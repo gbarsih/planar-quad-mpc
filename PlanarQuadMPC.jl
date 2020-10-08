@@ -19,17 +19,9 @@ Requirements:   JuMP, Ipopt, Plots, LinearAlgebra, BenchmarkTools.
 
 using JuMP, Ipopt
 using Plots, LinearAlgebra
-using BenchmarkTools
-using Random
-using RecipesBase
-using SparseArrays
-using Statistics
-using Printf
-using LaTeXStrings
-using Measures
-import Distributions: MvNormal
-import Random.seed!
+m = 0.486
 g = 9.81
+I = 0.01532
 
 function dynamics(x = 0.0 .* zeros(6), u = 0.0 .* zeros(2), dt = 1.0)
     #x = [px pz θ vx vz θ̇]
@@ -45,8 +37,27 @@ function dynamics(x = 0.0 .* zeros(6), u = 0.0 .* zeros(2), dt = 1.0)
     x[2] = vx * sin(θ) + vz * cos(θ)
     x[3] = θ̇
     x[4] = vz * θ̇ - g * sin(θ)
-    x[5] = -vx * θ̇ - g * cos.(θ) + u[1]
-    x[6] = 0.0 + u[2]
+    x[5] = -vx * θ̇ - g * cos.(θ) + u[1] / m
+    x[6] = 0.0 + u[2] / I
+    x = x * dt + x0
+end
+
+function angelaDynamics(x = 0.0 .* zeros(6), u = 0.0 .* zeros(2), dt = 1.0)
+    #x = [px pz θ vx vz θ̇]
+    #     1  2  3 4  5  6
+    px = x[1]
+    pz = x[2]
+    θ = x[3]
+    vx = x[4]
+    vz = x[5]
+    θ̇ = x[6]
+    x0 = copy(x)
+    x[1] = vx
+    x[2] = vz
+    x[3] = θ̇
+    x[4] = -1 / m * sin(θ) * u[1]
+    x[5] = 1 / m * cos(θ) * u[1] - g
+    x[6] = 0.0 + u[2] / I
     x = x * dt + x0
 end
 
@@ -55,12 +66,12 @@ function test_dynamics()
     t = Array(0:0.1:1)
     N = length(t)
     x = 0.0 .* zeros(6)
-    x[3] = -0.1
+    x[3] = 0.0
     u = 0.0 .* zeros(2)
     xv = 0.0 .* zeros(6, N)
     for i = 1:N
-        u[1] = 10.0
-        u[2] = 0.0 * (cos(t[i] / 10.0) - 0.5)
+        u[1] = g
+        u[2] = 0.1
         x = dynamics(x, u, dt)
         @show u, x
     end
@@ -69,10 +80,10 @@ end
 function SimpleMPC(
     x0,
     xref = 0.0 .* zeros(6),
-    θlim = Inf,
-    θ̇lim = Inf,
-    vxlim = Inf,
-    vzlim = Inf,
+    θlim = pi / 4,
+    θ̇lim = pi / 3,
+    vxlim = 2,
+    vzlim = 1,
     dt = 0.1,
     N = 10,
 )
@@ -88,7 +99,7 @@ function SimpleMPC(
     @variable(MPC, -vzlim <= vz[i = 0:N] <= vxlim)
     @variable(MPC, -θ̇lim <= θ̇[i = 0:N] <= θ̇lim)
     @variable(MPC, 0 <= uF[i = 0:N-1])
-    @variable(MPC, uM[i = 0:N-1])
+    @variable(MPC, -θ̇lim <= uM[i = 0:N-1] <= θ̇lim)
 
     @constraint(MPC, px[0] == x0[1])
     @constraint(MPC, pz[0] == x0[2])
@@ -100,26 +111,36 @@ function SimpleMPC(
     #x = [px pz θ vx vz θ̇]
     #     1  2  3 4  5  6
     for k = 0:N-1
-        @NLconstraint(MPC, px[k+1] == px[k] + (vx[k] * cos(θ[k]) - vz[k] * sin(θ[k])) * dt)
-        @NLconstraint(MPC, pz[k+1] == pz[k] + (vx[k] * sin(θ[k]) + vz[k] * cos(θ[k])) * dt)
-        @constraint(MPC, θ[k+1] == θ[k] + θ̇[k] * dt)
-        @NLconstraint(MPC, vx[k+1] == vx[k] + (vz[k] * θ̇[k] - g * sin(θ[k])) * dt)
-        @NLconstraint(MPC, vz[k+1] == vz[k] + (-vx[k] * θ̇[k] - g * cos(θ[k]) + uF[k]) * dt)
-        @constraint(MPC, θ̇[k+1] == θ̇[k] + uM[k] * dt)
+        #@NLconstraint(MPC, px[k+1] == px[k] + (vx[k] * cos(θ[k]) - vz[k] * sin(θ[k])) * dt)
+        #@NLconstraint(MPC, pz[k+1] == pz[k] + (vx[k] * sin(θ[k]) + vz[k] * cos(θ[k])) * dt)
+        #@constraint(MPC, θ[k+1] == θ[k] + θ̇[k] * dt)
+        #@NLconstraint(MPC, vx[k+1] == vx[k] + (vz[k] * θ̇[k] - g * sin(θ[k])) * dt)
+        #@NLconstraint(
+        #    MPC,
+        #    vz[k+1] == vz[k] + (-vx[k] * θ̇[k] - g * cos(θ[k]) + uF[k] / m) * dt
+        #)
+        #@constraint(MPC, θ̇[k+1] == θ̇[k] + uM[k] / I * dt)
+
+        @NLconstraint(MPC, px[k+1] == px[k] + vx[k] * dt)
+        @NLconstraint(MPC, pz[k+1] == pz[k] + vz[k] * dt)
+        @NLconstraint(MPC, θ[k+1] == θ[k] + θ̇[k] * dt)
+        @NLconstraint(MPC, vx[k+1] == vx[k] - 1 / m * sin(θ[k]) * dt)
+        @NLconstraint(MPC, vz[k+1] == vz[k] + (1 / m * sin(θ[k]) * uF[k] - g) * dt)
+        @NLconstraint(MPC, θ̇[k+1] == θ̇[k] + uM[k] / I * dt)
     end
 
-    @NLobjective(MPC, Min, sum(px[i] + pz[i] for i = 1:N))
+    @objective(MPC, Min, sum(px[i]^2 + pz[i]^2 for i = 1:N))
     optimize!(MPC)
     return value.(uF), value.(uM), value.(px), value.(pz)
 end
 
 function runSimpleMPC()
-    x = [1.0 1.0 0.0 0.0 0.0 0.0]
-    dt = 0.01
+    x = [0.0 1.0 0.0 0.0 0.0 0.0]
+    dt = 0.1
     for t = 1:30
-        uF, uM, px, pz = SimpleMPC(x, zeros(6), pi / 4, pi / 3, 2, 1, dt)
+        uF, uM, px, pz = SimpleMPC(x, 0.0*zeros(6), pi / 4, pi / 3, 2, 1, dt)
         u = [uF[0] uM[0]]
-        x = dynamics(x, u, dt)
+        x = angelaDynamics(x, u, dt)
         @show u, x
     end
 end
