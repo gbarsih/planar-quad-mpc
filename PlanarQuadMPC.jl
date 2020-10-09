@@ -129,7 +129,7 @@ function SimpleMPC(
         @constraint(MPC, θ̇[k+1] == θ̇[k] + uM[k] / I * dt)
     end
 
-    @objective(MPC, Min, sum(pz[i]^2 + px[i]^2 for i = 1:N))
+    @objective(MPC, Min, sum(pz[i]^2 + px[i]^2 + 1e-6*uM[i]^2 + 1e-6*uF[i]^2 for i = 1:N))
     optimize!(MPC)
     return value.(uF), value.(uM), value.(px), value.(pz)
 end
