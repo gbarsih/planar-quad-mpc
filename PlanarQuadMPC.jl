@@ -37,8 +37,8 @@ function dynamics(x = 0.0 .* zeros(6), u = 0.0 .* zeros(2), dt = 1.0)
     x[2] = vx * sin(θ) + vz * cos(θ)
     x[3] = θ̇
     x[4] = vz * θ̇ - g * sin(θ)
-    x[5] = -vx * θ̇ - g * cos.(θ) + u[1] / m
-    x[6] = 0.0 + u[2] / I
+    x[5] = -vx * θ̇ - g * cos(θ) + (u[1] + u[2]) / m
+    x[6] = 0.0 + (u[1] - u[2]) / I
     x = x * dt + x0
 end
 
@@ -98,8 +98,8 @@ function SimpleMPC(
     @variable(MPC, -vxlim <= vx[i = 0:N] <= vxlim)
     @variable(MPC, -vzlim <= vz[i = 0:N] <= vxlim)
     @variable(MPC, -θ̇lim <= θ̇[i = 0:N] <= θ̇lim)
-    @variable(MPC, 0 <= uF[i = 0:N])
-    @variable(MPC, -θ̇lim <= uM[i = 0:N] <= θ̇lim)
+    @variable(MPC, 0 <= u1[i = 0:N])
+    @variable(MPC, 0 <= u2[i = 0:N])
 
     @constraint(MPC, px[0] == x0[1])
     @constraint(MPC, pz[0] == x0[2])
@@ -111,27 +111,20 @@ function SimpleMPC(
     #x = [px pz θ vx vz θ̇]
     #     1  2  3 4  5  6
     for k = 0:N-1
-        #@NLconstraint(MPC, px[k+1] == px[k] + (vx[k] * cos(θ[k]) - vz[k] * sin(θ[k])) * dt)
-        #@NLconstraint(MPC, pz[k+1] == pz[k] + (vx[k] * sin(θ[k]) + vz[k] * cos(θ[k])) * dt)
-        #@constraint(MPC, θ[k+1] == θ[k] + θ̇[k] * dt)
-        #@NLconstraint(MPC, vx[k+1] == vx[k] + (vz[k] * θ̇[k] - g * sin(θ[k])) * dt)
-        #@NLconstraint(
-        #    MPC,
-        #    vz[k+1] == vz[k] + (-vx[k] * θ̇[k] - g * cos(θ[k]) + uF[k] / m) * dt
-        #)
-        #@constraint(MPC, θ̇[k+1] == θ̇[k] + uM[k] / I * dt)
-
-        @NLconstraint(MPC, px[k+1] == px[k] + vx[k] * dt)
-        @NLconstraint(MPC, pz[k+1] == pz[k] + vz[k] * dt)
+        @NLconstraint(MPC, px[k+1] == px[k] + (vx[k] * cos(θ[k]) - vz[k] * sin(θ[k])) * dt)
+        @NLconstraint(MPC, pz[k+1] == pz[k] + (vx[k] * sin(θ[k]) + vz[k] * cos(θ[k])) * dt)
         @constraint(MPC, θ[k+1] == θ[k] + θ̇[k] * dt)
-        @NLconstraint(MPC, vx[k+1] == vx[k] - 1 / m * sin(θ[k]) * dt)
-        @NLconstraint(MPC, vz[k+1] == vz[k] + (1 / m * cos(θ[k]) * uF[k] - g) * dt)
-        @constraint(MPC, θ̇[k+1] == θ̇[k] + uM[k] / I * dt)
+        @NLconstraint(MPC, vx[k+1] == vx[k] + (vz[k] * θ̇[k] - g * sin(θ[k])) * dt)
+        @NLconstraint(
+            MPC,
+            vz[k+1] == vz[k] + (-vx[k] * θ̇[k] - g * cos(θ[k]) + (u1[k] + u2[k]) / m) * dt
+        )
+        @constraint(MPC, θ̇[k+1] == θ̇[k] + (u1[k] - u2[k]) / I * dt)
     end
 
-    @objective(MPC, Min, sum(pz[i]^2 + px[i]^2 + 1e-6*uM[i]^2 + 1e-6*uF[i]^2 for i = 1:N))
+    @objective(MPC, Min, sum(pz[i]^2 + px[i]^2 + 1e-6*u1[i]^2 + 1e-6*u2[i]^2 for i = 1:N))
     optimize!(MPC)
-    return value.(uF), value.(uM), value.(px), value.(pz)
+    return value.(u1), value.(u2), value.(px), value.(pz)
 end
 
 function runSimpleMPC()
@@ -141,9 +134,9 @@ function runSimpleMPC()
     xv = zeros(6,N)
     tv = Array(0:dt:dt*(N-1))
     for t = 1:N
-        uF, uM, px, pz = SimpleMPC(x, 0.0*zeros(6), pi / 4, pi / 3, 2, 1, dt)
-        u = [uF[0] uM[0]]
-        x = angelaDynamics(x, u, dt)
+        u1, u2, px, pz = SimpleMPC(x, 0.0*zeros(6), pi / 4, pi / 3, 2, 1, dt)
+        u = [u1[0] u2[0]]
+        x = dynamics(x, u, dt)
         xv[:,t] = x
         @show u, x
     end
