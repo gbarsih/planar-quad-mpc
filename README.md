@@ -1,2 +1,2 @@
 # planar-quad-mpc
- MPc Controller for a planar quadrotor
+ MPC Controller for a planar quadrotor
