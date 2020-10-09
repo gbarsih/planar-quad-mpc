@@ -98,7 +98,7 @@ function SimpleMPC(
     @variable(MPC, -vxlim <= vx[i = 0:N] <= vxlim)
     @variable(MPC, -vzlim <= vz[i = 0:N] <= vxlim)
     @variable(MPC, -θ̇lim <= θ̇[i = 0:N] <= θ̇lim)
-    @variable(MPC, 0 <= uF[i = 0:N-1])
+    @variable(MPC, 0 <= uF[i = 0:N-1] <= 15.0)
     @variable(MPC, -θ̇lim <= uM[i = 0:N-1] <= θ̇lim)
 
     @constraint(MPC, px[0] == x0[1])
@@ -129,7 +129,7 @@ function SimpleMPC(
         @NLconstraint(MPC, θ̇[k+1] == θ̇[k] + uM[k] / I * dt)
     end
 
-    @objective(MPC, Min, sum(px[i]^2 + pz[i]^2 for i = 1:N))
+    @objective(MPC, Min, 1e6*sum(px[i]^2 + pz[i]^2 for i = 1:N))
     optimize!(MPC)
     return value.(uF), value.(uM), value.(px), value.(pz)
 end
@@ -141,6 +141,46 @@ function runSimpleMPC()
         uF, uM, px, pz = SimpleMPC(x, 0.0*zeros(6), pi / 4, pi / 3, 2, 1, dt)
         u = [uF[0] uM[0]]
         x = angelaDynamics(x, u, dt)
+        @show u, x
+    end
+end
+
+function doubleIntMPC(x0,dt,T=10,n=2)
+    MPC = Model(optimizer_with_attributes(
+        Ipopt.Optimizer,
+        "max_iter" => 5000,
+        "print_level" => 0,
+    ))
+    T = 10
+    n = 2
+    dt = 0.1
+    @variable(MPC, x[i=1:n,t=0:T])
+    @variable(MPC, -1 <= u[t=0:T] <= 1)
+    @objective(MPC, Min, sum((x[i,T]).^2 for i=1:n))
+    for i=1:n
+        @constraint(MPC, x[i,0] == x0[i])
+    end
+    for t=0:T-1
+        @constraint(MPC, x[1,t+1] == x[1,t] + x[2,t]*dt)
+        @constraint(MPC, x[2,t+1] == x[2,t] + u[t]*dt)
+    end
+    optimize!(MPC)
+    return value.(u), value.(x)
+end
+
+function doubleIntDynamics(x,u,dt)
+    x[1] = x[1] + x[2]*dt
+    x[2] = x[2] + u*dt
+    return x
+end
+
+function runDoubleIntMPC()
+    x = [1.0 0.0]
+    dt = 0.1
+    for t = 1:30
+        u,xout = doubleIntMPC(x,dt)
+        u = u[0]
+        x = doubleIntDynamics(x,u,dt)
         @show u, x
     end
 end
