@@ -129,7 +129,7 @@ function SimpleMPC(
         @NLconstraint(MPC, θ̇[k+1] == θ̇[k] + uM[k] / I * dt)
     end
 
-    @objective(MPC, Min, 1e6*sum(px[i]^2 + pz[i]^2 for i = 1:N))
+    @objective(MPC, Min, sum(px[i]^2 + pz[i]^2 for i = 1:N))
     optimize!(MPC)
     return value.(uF), value.(uM), value.(px), value.(pz)
 end
@@ -175,10 +175,11 @@ function doubleIntDynamics(x,u,dt)
 end
 
 function runDoubleIntMPC()
-    x = [1.0 0.0]
+    clearconsole()
+    x = [1.0 1.0]
     dt = 0.1
-    for t = 1:30
-        u,xout = doubleIntMPC(x,dt)
+    for t = 1:60
+        u,xout = doubleIntMPC(x,dt,10)
         u = u[0]
         x = doubleIntDynamics(x,u,dt)
         @show u, x
