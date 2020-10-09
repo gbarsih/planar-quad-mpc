@@ -19,7 +19,7 @@ Requirements:   JuMP, Ipopt, Plots, LinearAlgebra, BenchmarkTools.
 
 using JuMP, Ipopt
 using Plots, LinearAlgebra
-m = 0.486
+m = 0.483
 g = 9.81
 I = 0.01532
 
@@ -55,7 +55,7 @@ function angelaDynamics(x = 0.0 .* zeros(6), u = 0.0 .* zeros(2), dt = 1.0)
     x[1] = vx
     x[2] = vz
     x[3] = θ̇
-    x[4] = -1 / m * sin(θ) * u[1]
+    x[4] = -1 / m * sin(θ)
     x[5] = 1 / m * cos(θ) * u[1] - g
     x[6] = 0.0 + u[2] / I
     x = x * dt + x0
@@ -85,11 +85,11 @@ function SimpleMPC(
     vxlim = 2,
     vzlim = 1,
     dt = 0.1,
-    N = 10,
+    N = 20,
 )
     MPC = Model(optimizer_with_attributes(
         Ipopt.Optimizer,
-        "max_iter" => 5000,
+        "max_iter" => 10,
         "print_level" => 0,
     ))
     @variable(MPC, px[i = 0:N])
@@ -98,8 +98,8 @@ function SimpleMPC(
     @variable(MPC, -vxlim <= vx[i = 0:N] <= vxlim)
     @variable(MPC, -vzlim <= vz[i = 0:N] <= vxlim)
     @variable(MPC, -θ̇lim <= θ̇[i = 0:N] <= θ̇lim)
-    @variable(MPC, 0 <= uF[i = 0:N-1] <= 15.0)
-    @variable(MPC, -θ̇lim <= uM[i = 0:N-1] <= θ̇lim)
+    @variable(MPC, 0 <= uF[i = 0:N])
+    @variable(MPC, -θ̇lim <= uM[i = 0:N] <= θ̇lim)
 
     @constraint(MPC, px[0] == x0[1])
     @constraint(MPC, pz[0] == x0[2])
@@ -123,26 +123,32 @@ function SimpleMPC(
 
         @NLconstraint(MPC, px[k+1] == px[k] + vx[k] * dt)
         @NLconstraint(MPC, pz[k+1] == pz[k] + vz[k] * dt)
-        @NLconstraint(MPC, θ[k+1] == θ[k] + θ̇[k] * dt)
+        @constraint(MPC, θ[k+1] == θ[k] + θ̇[k] * dt)
         @NLconstraint(MPC, vx[k+1] == vx[k] - 1 / m * sin(θ[k]) * dt)
-        @NLconstraint(MPC, vz[k+1] == vz[k] + (1 / m * sin(θ[k]) * uF[k] - g) * dt)
-        @NLconstraint(MPC, θ̇[k+1] == θ̇[k] + uM[k] / I * dt)
+        @NLconstraint(MPC, vz[k+1] == vz[k] + (1 / m * cos(θ[k]) * uF[k] - g) * dt)
+        @constraint(MPC, θ̇[k+1] == θ̇[k] + uM[k] / I * dt)
     end
 
-    @objective(MPC, Min, sum(px[i]^2 + pz[i]^2 for i = 1:N))
+    @objective(MPC, Min, sum(pz[i]^2 + px[i]^2 for i = 1:N))
     optimize!(MPC)
     return value.(uF), value.(uM), value.(px), value.(pz)
 end
 
 function runSimpleMPC()
-    x = [0.0 1.0 0.0 0.0 0.0 0.0]
+    x = [1.0 1.0 0.0 0.0 0.0 0.0]
     dt = 0.1
-    for t = 1:30
+    N = 50
+    xv = zeros(6,N)
+    tv = Array(0:dt:dt*(N-1))
+    for t = 1:N
         uF, uM, px, pz = SimpleMPC(x, 0.0*zeros(6), pi / 4, pi / 3, 2, 1, dt)
         u = [uF[0] uM[0]]
         x = angelaDynamics(x, u, dt)
+        xv[:,t] = x
         @show u, x
     end
+    plot(tv,xv[1,:])
+    plot!(tv,xv[2,:])
 end
 
 function doubleIntMPC(x0,dt,T=10,n=2)
