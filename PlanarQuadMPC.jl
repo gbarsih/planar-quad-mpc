@@ -85,11 +85,11 @@ function SimpleMPC(
     vxlim = 2,
     vzlim = 1,
     dt = 0.1,
-    N = 20,
+    N = 30,
 )
     MPC = Model(optimizer_with_attributes(
         Ipopt.Optimizer,
-        "max_iter" => 10,
+        "max_iter" => 35,
         "print_level" => 0,
     ))
     @variable(MPC, px[i = 0:N])
@@ -100,6 +100,7 @@ function SimpleMPC(
     @variable(MPC, -θ̇lim <= θ̇[i = 0:N] <= θ̇lim)
     @variable(MPC, 0 <= u1[i = 0:N])
     @variable(MPC, 0 <= u2[i = 0:N])
+    @variable(MPC, β >= 0)
 
     @constraint(MPC, px[0] == x0[1])
     @constraint(MPC, pz[0] == x0[2])
@@ -120,17 +121,18 @@ function SimpleMPC(
             vz[k+1] == vz[k] + (-vx[k] * θ̇[k] - g * cos(θ[k]) + (u1[k] + u2[k]) / m) * dt
         )
         @constraint(MPC, θ̇[k+1] == θ̇[k] + (u1[k] - u2[k]) / I * dt)
+        #@constraint(MPC, px[k] >= β)
     end
 
-    @objective(MPC, Min, sum(pz[i]^2 + px[i]^2 + 1e-6*u1[i]^2 + 1e-6*u2[i]^2 for i = 1:N))
+    @objective(MPC, Min, 0 + sum(pz[i]^2 + px[i]^2 + 1e-6*u1[i]^2 + 1e-6*u2[i]^2 for i = 0:N))
     optimize!(MPC)
     return value.(u1), value.(u2), value.(px), value.(pz)
 end
 
 function runSimpleMPC()
-    x = [1.0 1.0 0.0 0.0 0.0 0.0]
+    x = [2.0 2.0 0.0 0.0 0.0 0.0]
     dt = 0.1
-    N = 50
+    N = 30
     xv = zeros(6,N)
     tv = Array(0:dt:dt*(N-1))
     for t = 1:N
@@ -140,47 +142,99 @@ function runSimpleMPC()
         xv[:,t] = x
         @show u, x
     end
-    plot(tv,xv[1,:])
-    plot!(tv,xv[2,:])
+    plot(xv[1,:],xv[2,:],label = "Position", lw = 3)
 end
 
-function doubleIntMPC(x0,dt,T=10,n=2)
+function upperTrack(x)
+    return sin.(x./2) .+ 2.0
+end
+
+function lowerTrack(x)
+    return sin.(x./2) .- 0.0
+end
+
+function plotTrack(xi=0.0,xf=10.0)
+    xv = Array(xi:0.1:xf)
+    plot(xv,upperTrack(xv),color=:black)
+    plot!(xv,lowerTrack(xv),color=:black)
+end
+
+function infinteTrackMPC(
+    x0,
+    xref = 0.0 .* zeros(6),
+    θlim = pi / 4,
+    θ̇lim = pi / 3,
+    vxlim = 2,
+    vzlim = 1,
+    dt = 0.1,
+    N = 20,
+)
     MPC = Model(optimizer_with_attributes(
         Ipopt.Optimizer,
-        "max_iter" => 5000,
+        "max_iter" => 205,
         "print_level" => 0,
     ))
-    T = 10
-    n = 2
-    dt = 0.1
-    @variable(MPC, x[i=1:n,t=0:T])
-    @variable(MPC, -1 <= u[t=0:T] <= 1)
-    @objective(MPC, Min, sum((x[i,T]).^2 for i=1:n))
-    for i=1:n
-        @constraint(MPC, x[i,0] == x0[i])
+    #State variables
+    @variable(MPC, px[i = 0:N])
+    @variable(MPC, pz[i = 0:N])
+    @variable(MPC, -θlim <= θ[i = 0:N] <= θlim)
+    @variable(MPC, 0.0 <= vx[i = 0:N] <= vxlim)
+    @variable(MPC, -vzlim <= vz[i = 0:N] <= vxlim)
+    @variable(MPC, -θ̇lim <= θ̇[i = 0:N] <= θ̇lim)
+    @variable(MPC, 0 <= u1[i = 0:N])
+    @variable(MPC, 0 <= u2[i = 0:N])
+    @variable(MPC, β >= 0) #optional slack variable
+
+    #State initial constraints
+    @constraint(MPC, px[0] == x0[1])
+    @constraint(MPC, pz[0] == x0[2])
+    @constraint(MPC, θ[0] == x0[3])
+    @constraint(MPC, vx[0] == x0[4])
+    @constraint(MPC, vz[0] == x0[5])
+    @constraint(MPC, θ̇[0] == x0[6])
+
+    #x = [px pz θ vx vz θ̇]
+    #     1  2  3 4  5  6
+    for k = 0:N-1
+        #Dynamics constraints
+        @NLconstraint(MPC, px[k+1] == px[k] + (vx[k] * cos(θ[k]) - vz[k] * sin(θ[k])) * dt)
+        @NLconstraint(MPC, pz[k+1] == pz[k] + (vx[k] * sin(θ[k]) + vz[k] * cos(θ[k])) * dt)
+        @constraint(MPC, θ[k+1] == θ[k] + θ̇[k] * dt)
+        @NLconstraint(MPC, vx[k+1] == vx[k] + (vz[k] * θ̇[k] - g * sin(θ[k])) * dt)
+        @NLconstraint(
+            MPC,
+            vz[k+1] == vz[k] + (-vx[k] * θ̇[k] - g * cos(θ[k]) + (u1[k] + u2[k]) / m) * dt
+        )
+        @constraint(MPC, θ̇[k+1] == θ̇[k] + (u1[k] - u2[k]) / I * dt)
+
+        #Track Constraints
+        @NLconstraint(MPC, pz[k] <= sin(px[k]/2) + 2.0) #upper track
+        @NLconstraint(MPC, pz[k] >= sin(px[k]/2) - 0.0) #lower track
+        @constraint(MPC, (u1[k+1]-u1[k])^2<=0.001)
+        @constraint(MPC, (u2[k+1]-u2[k])^2<=0.001)
     end
-    for t=0:T-1
-        @constraint(MPC, x[1,t+1] == x[1,t] + x[2,t]*dt)
-        @constraint(MPC, x[2,t+1] == x[2,t] + u[t]*dt)
-    end
+
+    @NLobjective(MPC, Max, sum(px[i] for i=0:N))
     optimize!(MPC)
-    return value.(u), value.(x)
+    return value.(u1), value.(u2), value.(px), value.(pz), MPC
 end
 
-function doubleIntDynamics(x,u,dt)
-    x[1] = x[1] + x[2]*dt
-    x[2] = x[2] + u*dt
-    return x
-end
-
-function runDoubleIntMPC()
-    clearconsole()
-    x = [1.0 1.0]
+function runTrackMPC()
+    default(dpi = 300)
+    default(thickness_scaling = 2)
+    default(size = [1200, 800])
+    x = [0.0 0.5 0.0 0.0 0.0 0.0]
     dt = 0.1
-    for t = 1:60
-        u,xout = doubleIntMPC(x,dt,10)
-        u = u[0]
-        x = doubleIntDynamics(x,u,dt)
-        @show u, x
+    N = 1000
+    xv = zeros(6,N)
+    tv = Array(0:dt:dt*(N-1))
+    for t = 1:N
+        u1, u2, px, pz = infinteTrackMPC(x, 0.0*zeros(6), pi / 4, pi / 3, 2, 1, dt)
+        u = [u1[0] u2[0]]
+        x = dynamics(x, u, dt)
+        xv[:,t] = x
+        @show u, x, t
     end
+    plotTrack(min(xv[1,:]...),max(xv[1,:]...))
+    plot!(xv[1,:],xv[2,:],label = "Position", lw = 3)
 end
