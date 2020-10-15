@@ -19,6 +19,7 @@ Requirements:   JuMP, Ipopt, Plots, LinearAlgebra, BenchmarkTools.
 
 using JuMP, Ipopt
 using Plots, LinearAlgebra
+gr()
 m = 0.483
 g = 9.81
 I = 0.01532
@@ -124,7 +125,11 @@ function SimpleMPC(
         #@constraint(MPC, px[k] >= β)
     end
 
-    @objective(MPC, Min, 0 + sum(pz[i]^2 + px[i]^2 + 1e-6*u1[i]^2 + 1e-6*u2[i]^2 for i = 0:N))
+    @objective(
+        MPC,
+        Min,
+        0 + sum(pz[i]^2 + px[i]^2 + 1e-6 * u1[i]^2 + 1e-6 * u2[i]^2 for i = 0:N)
+    )
     optimize!(MPC)
     return value.(u1), value.(u2), value.(px), value.(pz)
 end
@@ -133,30 +138,30 @@ function runSimpleMPC()
     x = [2.0 2.0 0.0 0.0 0.0 0.0]
     dt = 0.1
     N = 30
-    xv = zeros(6,N)
+    xv = zeros(6, N)
     tv = Array(0:dt:dt*(N-1))
     for t = 1:N
-        u1, u2, px, pz = SimpleMPC(x, 0.0*zeros(6), pi / 4, pi / 3, 2, 1, dt)
+        u1, u2, px, pz = SimpleMPC(x, 0.0 * zeros(6), pi / 4, pi / 3, 2, 1, dt)
         u = [u1[0] u2[0]]
         x = dynamics(x, u, dt)
-        xv[:,t] = x
+        xv[:, t] = x
         @show u, x
     end
-    plot(xv[1,:],xv[2,:],label = "Position", lw = 3)
+    plot(xv[1, :], xv[2, :], label = "Position", lw = 3)
 end
 
 function upperTrack(x)
-    return sin.(x./2) .+ 2.0
+    return sin.(x ./ 2) .+ 2.0
 end
 
 function lowerTrack(x)
-    return sin.(x./2) .- 0.0
+    return sin.(x ./ 2) .- 0.0
 end
 
-function plotTrack(xi=0.0,xf=10.0)
+function plotTrack(xi = 0.0, xf = 10.0)
     xv = Array(xi:0.1:xf)
-    plot(xv,upperTrack(xv),color=:black)
-    plot!(xv,lowerTrack(xv),color=:black)
+    plot(xv, upperTrack(xv), color = :black)
+    plot!(xv, lowerTrack(xv), color = :black)
 end
 
 function infinteTrackMPC(
@@ -167,18 +172,18 @@ function infinteTrackMPC(
     vxlim = 2,
     vzlim = 1,
     dt = 0.1,
-    N = 20,
+    N = 10,
 )
     MPC = Model(optimizer_with_attributes(
         Ipopt.Optimizer,
-        "max_iter" => 205,
+        "max_iter" => 55,
         "print_level" => 0,
     ))
     #State variables
     @variable(MPC, px[i = 0:N])
     @variable(MPC, pz[i = 0:N])
     @variable(MPC, -θlim <= θ[i = 0:N] <= θlim)
-    @variable(MPC, 0.0 <= vx[i = 0:N] <= vxlim)
+    @variable(MPC, -vxlim <= vx[i = 0:N] <= vxlim)
     @variable(MPC, -vzlim <= vz[i = 0:N] <= vxlim)
     @variable(MPC, -θ̇lim <= θ̇[i = 0:N] <= θ̇lim)
     @variable(MPC, 0 <= u1[i = 0:N])
@@ -208,13 +213,13 @@ function infinteTrackMPC(
         @constraint(MPC, θ̇[k+1] == θ̇[k] + (u1[k] - u2[k]) / I * dt)
 
         #Track Constraints
-        @NLconstraint(MPC, pz[k] <= sin(px[k]/2) + 2.0) #upper track
-        @NLconstraint(MPC, pz[k] >= sin(px[k]/2) - 0.0) #lower track
-        @constraint(MPC, (u1[k+1]-u1[k])^2<=0.001)
-        @constraint(MPC, (u2[k+1]-u2[k])^2<=0.001)
+        @NLconstraint(MPC, pz[k] <= sin(px[k] / 2) + 2.0) #upper track
+        @NLconstraint(MPC, pz[k] >= sin(px[k] / 2) - 0.0) #lower track
+        @constraint(MPC, (u1[k+1] - u1[k])^2 <= 0.01)
+        @constraint(MPC, (u2[k+1] - u2[k])^2 <= 0.01)
     end
 
-    @NLobjective(MPC, Max, sum(px[i] for i=0:N))
+    @NLobjective(MPC, Max, sum(vx[i] * cos(θ[i] - vz[i] * sin(θ[i])) for i = 0:N))
     optimize!(MPC)
     return value.(u1), value.(u2), value.(px), value.(pz), MPC
 end
@@ -225,16 +230,141 @@ function runTrackMPC()
     default(size = [1200, 800])
     x = [0.0 0.5 0.0 0.0 0.0 0.0]
     dt = 0.1
-    N = 1000
-    xv = zeros(6,N)
+    N = 200
+    xv = zeros(6, N)
     tv = Array(0:dt:dt*(N-1))
     for t = 1:N
-        u1, u2, px, pz = infinteTrackMPC(x, 0.0*zeros(6), pi / 4, pi / 3, 2, 1, dt)
+        u1, u2, px, pz = infinteTrackMPC(x, 0.0 * zeros(6), pi / 4, pi / 3, 2, 1, dt)
         u = [u1[0] u2[0]]
         x = dynamics(x, u, dt)
-        xv[:,t] = x
+        xv[:, t] = x
         @show u, x, t
     end
-    plotTrack(min(xv[1,:]...),max(xv[1,:]...))
-    plot!(xv[1,:],xv[2,:],label = "Position", lw = 3)
+    plotTrack(min(xv[1, :]...), max(xv[1, :]...))
+    plot!(xv[1, :], xv[2, :], label = "Position", lw = 3)
+end
+
+function ObstacleMPC(
+    x0,
+    xref = 0.0 .* zeros(6),
+    Obstacles = nothing,
+    θlim = pi / 4,
+    θ̇lim = pi / 3,
+    vxlim = 2,
+    vzlim = 1,
+    dt = 0.1,
+    N = 30,
+)
+    MPC = Model(optimizer_with_attributes(
+        Ipopt.Optimizer,
+        "max_iter" => 600,
+        "print_level" => 0,
+    ))
+    #State variables
+    @variable(MPC, px[i = 0:N])
+    @variable(MPC, pz[i = 0:N])
+    @variable(MPC, -θlim <= θ[i = 0:N] <= θlim)
+    @variable(MPC, -vxlim <= vx[i = 0:N] <= vxlim)
+    @variable(MPC, -vzlim <= vz[i = 0:N] <= vxlim)
+    @variable(MPC, -θ̇lim <= θ̇[i = 0:N] <= θ̇lim)
+    @variable(MPC, 0 <= u1[i = 0:N])
+    @variable(MPC, 0 <= u2[i = 0:N])
+    @variable(MPC, β >= 0) #optional slack variable
+
+    #State initial constraints
+    @constraint(MPC, px[0] == x0[1])
+    @constraint(MPC, pz[0] == x0[2])
+    @constraint(MPC, θ[0] == x0[3])
+    @constraint(MPC, vx[0] == x0[4])
+    @constraint(MPC, vz[0] == x0[5])
+    @constraint(MPC, θ̇[0] == x0[6])
+
+    #x = [px pz θ vx vz θ̇]
+    #     1  2  3 4  5  6
+    for k = 0:N-1
+        #Dynamics constraints
+        @NLconstraint(MPC, px[k+1] == px[k] + (vx[k] * cos(θ[k]) - vz[k] * sin(θ[k])) * dt)
+        @NLconstraint(MPC, pz[k+1] == pz[k] + (vx[k] * sin(θ[k]) + vz[k] * cos(θ[k])) * dt)
+        @constraint(MPC, θ[k+1] == θ[k] + θ̇[k] * dt)
+        @NLconstraint(MPC, vx[k+1] == vx[k] + (vz[k] * θ̇[k] - g * sin(θ[k])) * dt)
+        @NLconstraint(
+            MPC,
+            vz[k+1] == vz[k] + (-vx[k] * θ̇[k] - g * cos(θ[k]) + (u1[k] + u2[k]) / m) * dt
+        )
+        @constraint(MPC, θ̇[k+1] == θ̇[k] + (u1[k] - u2[k]) / I * dt)
+        @constraint(MPC, (u1[k+1] - u1[k])^2 <= 0.1)
+        @constraint(MPC, (u2[k+1] - u2[k])^2 <= 0.1)
+        for i = 1:size(Obstacles, 1)
+            @constraint(
+                MPC,
+                (px[k] - Obstacles[i, 1])^2 + (pz[k] - Obstacles[i, 2])^2 >=
+                Obstacles[i, 3]^2
+            )
+        end
+    end
+
+    @objective(
+        MPC,
+        Min,
+        0 + sum(
+            (pz[i] - xref[2])^2 + (px[i] - xref[1])^2 + 1e-6 * u1[i]^2 + 1e-6 * u2[i]^2
+            for i = 0:N
+        )
+    )
+    optimize!(MPC)
+    return value.(u1), value.(u2), value.(px), value.(pz)
+end
+
+function runObstacleMPC()
+    x = [0.0 0.0 0.0 0.0 0.0 0.0]
+    xref = [3.0 5.0 0.0 0.0 0.0 0.0]
+    dt = 0.1
+    N = 40
+    xv = zeros(6, N)
+    tv = Array(0:dt:dt*(N-1))
+    xCenters = [4.0; 1.0]
+    yCenters = [3.0; 4.0]
+    Diameters = [1.0; 1.0]
+    Obstacles = [xCenters yCenters Diameters]
+    for t = 1:N
+        u1, u2, px, pz = ObstacleMPC(x, xref, Obstacles, pi / 4, pi / 3, 2, 1, dt)
+        u = [u1[0] u2[0]]
+        x = dynamics(x, u, dt)
+        xv[:, t] = x
+        @show u, x
+    end
+    default(dpi = 300)
+    default(thickness_scaling = 2)
+    default(size = [1200, 800])
+    h = plot(xv[1, :], xv[2, :], label = "Position", lw = 3)
+    h = plotObstacles(Obstacles)
+    display(h)
+end
+
+function plotObstacles(Obstacles)
+    nObstacles = size(Obstacles, 1)
+    h = nothing
+    for i = 1:nObstacles
+        h = plotCircle(Obstacles[i, 1], Obstacles[i, 2], Obstacles[i, 3])
+    end
+    return h
+end
+
+function circleShape(h, k, r)
+    θ = LinRange(0, 2 * pi, 500)
+    h .+ r * sin.(θ), k .+ r * cos.(θ)
+end
+
+function plotCircle(x, y, r)
+    h = plot!(
+        circleShape(x, y, r),
+        seriesType = [:shape],
+        lw = 0.5,
+        c = :blue,
+        linecolor = :black,
+        legend = false,
+        fillalpha = 0.2,
+        aspect_ratio = 1,
+    )
+    return h
 end
