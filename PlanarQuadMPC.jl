@@ -292,13 +292,13 @@ function ObstacleMPC(
             vz[k+1] == vz[k] + (-vx[k] * θ̇[k] - g * cos(θ[k]) + (u1[k] + u2[k]) / m) * dt
         )
         @constraint(MPC, θ̇[k+1] == θ̇[k] + (u1[k] - u2[k]) / I * dt)
-        @constraint(MPC, (u1[k+1] - u1[k])^2 <= 0.1)
-        @constraint(MPC, (u2[k+1] - u2[k])^2 <= 0.1)
+        #@constraint(MPC, (u1[k+1] - u1[k])^2 <= 0.1)
+        #@constraint(MPC, (u2[k+1] - u2[k])^2 <= 0.1)
         for i = 1:size(Obstacles, 1)
             @constraint(
                 MPC,
                 (px[k] - Obstacles[i, 1])^2 + (pz[k] - Obstacles[i, 2])^2 >=
-                Obstacles[i, 3]^2
+                (Obstacles[i, 3])^2
             )
         end
     end
@@ -307,7 +307,7 @@ function ObstacleMPC(
         MPC,
         Min,
         0 + sum(
-            (pz[i] - xref[2])^2 + (px[i] - xref[1])^2 + 1e-6 * u1[i]^2 + 1e-6 * u2[i]^2
+            (pz[i] - xref[2])^2 + (px[i] - xref[1])^2 + 1e-12 * u1[i]^2 + 1e-12 * u2[i]^2
             for i = 0:N
         )
     )
@@ -323,7 +323,7 @@ function runObstacleMPC()
     xv = zeros(6, N)
     tv = Array(0:dt:dt*(N-1))
     xCenters = [4.0; 1.0]
-    yCenters = [3.0; 4.0]
+    yCenters = [3.0; 2.5]
     Diameters = [1.0; 1.0]
     Obstacles = [xCenters yCenters Diameters]
     for t = 1:N
