@@ -162,36 +162,38 @@ for i=1:m
 
         #Final
         for j=1:order+1
-            values(j) = polyval(computeMat(j,:),t(m+1));
+            poly = Polynomial(computeMat[j,:])
+            values[j] = poly(t[m+1])
         end
 
         for k=1:n
             c = zeros(1,n*(order+1)*m);
-            c( ((m-1)*(order+1)*n+(k-1)*(order+1)+1) : ((m-1)*(order+1)*n+(k-1)*(order+1))+order+1) = values;
-            C1(k+n,:) = c;
+            c[ ((m-1)*(order+1)*n+(k-1)*(order+1)+1) : ((m-1)*(order+1)*n+(k-1)*(order+1))+order+1 ] = values;
+            C1[k+n,:] = c;
         end
-        b1(n+1:2*n) = waypoint;
+        b1[n+1:2*n] = waypoint;
 
     else
         #Elsewhere
         values = zeros(1,order+1);
         for j=1:order+1
-            values(j) = polyval(computeMat(j,:),t(i));
+            poly = Polynomial(computeMat[j,:])
+            values[j] = poly(t[i]);
         end
 
         for k=1:n
             c = zeros(1,n*(order+1)*m);
-            c( ((i-2)*(order+1)*n+(k-1)*(order+1)+1) : ((i-2)*(order+1)*n+(k-1)*(order+1))+order+1) = values;
-            C1(k+2*n*(i-1),:) = c;
+            c[ ((i-2)*(order+1)*n+(k-1)*(order+1)+1) : ((i-2)*(order+1)*n+(k-1)*(order+1))+order+1 ] = values;
+            C1[k+2*n*(i-1),:] = c;
         end
-        b1(2*n*(i-1)+1:2*n*(i-1)+n) = waypoint;
+        b1[2*n*(i-1)+1:2*n*(i-1)+n] = waypoint;
 
         for k=1:n
             c = zeros(1,n*(order+1)*m);
-            c( ((i-1)*(order+1)*n+(k-1)*(order+1)+1) : ((i-1)*(order+1)*n+(k-1)*(order+1))+order+1) = values;
-            C1(k+2*n*(i-1)+n,:) = c;
+            c[ ((i-1)*(order+1)*n+(k-1)*(order+1)+1) : ((i-1)*(order+1)*n+(k-1)*(order+1))+order+1 ] = values;
+            C1[k+2*n*(i-1)+n,:] = c;
         end
-        b1(2*n*(i-1)+n+1:2*n*(i-1)+2*n) = waypoint;
+        b1[2*n*(i-1)+n+1:2*n*(i-1)+2*n] = waypoint;
 
     end
 
@@ -202,8 +204,50 @@ end
 
 # Position
 C2 = zeros(2*m*(n-1)*k_r,n*(order+1)*m);                    #(n-1) : yaw excluded here
-b2 = ones(2*m*(n-1)*k_r,1)*eps;
-constraintData;
+b2 = ones(2*m*(n-1)*k_r,1)*eps(1.0);
+
+#Only for the quadrotor system
+#Position constraints
+constraintData_r = zeros(m,k_r,3);
+#velocity
+if(k_r>=1)
+    constraintData_r[1,1,1:3] .= 0;          #At starting position
+    constraintData_r[2:m,1,1:2] .= eps(1.0);      #x,y velocities
+    constraintData_r[2:m,1,3] .= eps(1.0);        #z velocity
+end
+#acceleration
+if(k_r>=2)
+    constraintData_r[1,2,3] = 0;            #At starting position
+    constraintData_r[2:m,2,1:2] .= eps(1.0);      #x,y accelerations
+    constraintData_r[2:m,2,3] .= eps(1.0);        #z acceleration
+end
+#jerk
+if(k_r>=3)
+#all zeros
+end
+#snap
+if(k_r>=4)
+#all zeros
+end
+#Yaw constraints
+constraintData_psi = zeros(m,k_psi,1);
+#velocity
+if(k_psi>=1)
+    constraintData_psi[1,1,1] = 0;          #At starting position
+end
+#acceleration
+if(k_psi>=2)
+#all zeros
+end
+#jerk
+if(k_psi>=3)
+#all zeros
+end
+#snap
+if(k_psi>=4)
+#all zeros
+end
+
 #constraintData_r = zeros(m,k_r,3);
 for i=1:m
     for h=1:k_r
@@ -211,52 +255,54 @@ for i=1:m
             #Initial
             values = zeros(1,order+1);
             for j=1:order+1
-                tempCoeffs = computeMat(j,:);
+                tempCoeffs = computeMat[j,:];
                 for k=1:h
-                    tempCoeffs = polyder(tempCoeffs);
+                    tempCoeffs = derivative(Polynomial(tempCoeffs)).coeffs
                 end
-                values(j) = polyval(tempCoeffs,t(i));
+                tempPoly = Polynomial(tempCoeffs)
+                values[j] = tempPoly(t[i]);
             end
 
             continuity = zeros(1,n-1);
             for k=1:n-1
-                if(constraintData_r(i,h,k)==eps)
-                    %Continuity
-                    continuity(k) = true;
+                if(constraintData_r[i,h,k]==eps(1.0))
+                    #Continuity
+                    continuity[k] = true;
                 end
 
                 c = zeros(1,n*(order+1)*m);
-                if(continuity(k))
-                    c( ((i-1)*(order+1)*n+(k-1)*(order+1)+1) : ((i-1)*(order+1)*n+(k-1)*(order+1))+order+1) = values;
-                    c( ((m-1)*(order+1)*n+(k-1)*(order+1)+1) : ((m-1)*(order+1)*n+(k-1)*(order+1))+order+1) = -values;
-                    C2(k + (h-1)*(n-1),:) = c;
-                    b2(k + (h-1)*(n-1)) = 0;
+                if(continuity[k]==true)
+                    c[ ((i-1)*(order+1)*n+(k-1)*(order+1)+1) : ((i-1)*(order+1)*n+(k-1)*(order+1))+order+1] = values;
+                    c[ ((m-1)*(order+1)*n+(k-1)*(order+1)+1) : ((m-1)*(order+1)*n+(k-1)*(order+1))+order+1] = -values;
+                    C2[k + (h-1)*(n-1),:] = c;
+                    b2[k + (h-1)*(n-1)] = 0;
                 else
-                    c( ((i-1)*(order+1)*n+(k-1)*(order+1)+1) : ((i-1)*(order+1)*n+(k-1)*(order+1))+order+1) = values;
-                    C2(k + (h-1)*(n-1),:) = c;
-                    b2(k + (h-1)*(n-1)) = constraintData_r(i,h,k);
+                    c[ ((i-1)*(order+1)*n+(k-1)*(order+1)+1) : ((i-1)*(order+1)*n+(k-1)*(order+1))+order+1] = values;
+                    C2[k + (h-1)*(n-1),:] = c;
+                    b2[k + (h-1)*(n-1)] = constraintData_r[i,h,k];
                 end
             end
 
             #Final
             values = zeros(1,order+1);
             for j=1:order+1
-                tempCoeffs = computeMat(j,:);
+                tempCoeffs = computeMat[j,:];
                 for k=1:h
-                    tempCoeffs = polyder(tempCoeffs);
+                    tempCoeffs = derivative(Polynomial(tempCoeffs)).coeffs
                 end
-                values(j) = polyval(tempCoeffs,t(m+1));
+                tempPoly = Polynomial(tempCoeffs)
+                values[j] = tempPoly(t[i]);
             end
 
             for k=1:n-1
-                if(constraintData_r(i,h,k)==eps)
+                if(constraintData_r[i,h,k]==eps(1.0))
                     #Continuity
                 end
                 c = zeros(1,n*(order+1)*m);
-                if(~continuity(k))
-                    c( ((m-1)*(order+1)*n+(k-1)*(order+1)+1) : ((m-1)*(order+1)*n+(k-1)*(order+1))+order+1) = values;
-                    C2(k + (h-1)*(n-1) + (n-1)*k_r,:) = c;
-                    b2(k + (h-1)*(n-1) + (n-1)*k_r) = constraintData_r(i,h,k);
+                if(continuity[k]==0)
+                    c[ ((m-1)*(order+1)*n+(k-1)*(order+1)+1) : ((m-1)*(order+1)*n+(k-1)*(order+1))+order+1] = values;
+                    C2[k + (h-1)*(n-1) + (n-1)*k_r,:] = c;
+                    b2[k + (h-1)*(n-1) + (n-1)*k_r] = constraintData_r[i,h,k];
                 end
             end
 
@@ -265,45 +311,46 @@ for i=1:m
             #Elsewhere
             values = zeros(1,order+1);
             for j=1:order+1
-                tempCoeffs = computeMat(j,:);
+                tempCoeffs = computeMat[j,:];
                 for k=1:h
-                    tempCoeffs = polyder(tempCoeffs);
+                    tempCoeffs = derivative(Polynomial(tempCoeffs)).coeffs
                 end
-                values(j) = polyval(tempCoeffs,t(i));
+                tempPoly = Polynomial(tempCoeffs)
+                values[j] = tempPoly(t[i]);
             end
 
             continuity = zeros(1,n-1);
             for k=1:n-1
-                if(constraintData_r(i,h,k)==eps)
+                if(constraintData_r[i,h,k]==eps(1.0))
                     #Continuity
-                    continuity(k) = true;
+                    continuity[k] = true;
                 end
 
                 c = zeros(1,n*(order+1)*m);
-                if(continuity(k))
-                    c( ((i-2)*(order+1)*n+(k-1)*(order+1)+1) : ((i-2)*(order+1)*n+(k-1)*(order+1))+order+1) = values;
-                    c( ((i-1)*(order+1)*n+(k-1)*(order+1)+1) : ((i-1)*(order+1)*n+(k-1)*(order+1))+order+1) = -values;
-                    C2(k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r,:) = c;
-                    b2(k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r) = 0;
+                if(continuity[k]==true)
+                    c[ ((i-2)*(order+1)*n+(k-1)*(order+1)+1) : ((i-2)*(order+1)*n+(k-1)*(order+1))+order+1] = values;
+                    c[ ((i-1)*(order+1)*n+(k-1)*(order+1)+1) : ((i-1)*(order+1)*n+(k-1)*(order+1))+order+1] = -values;
+                    C2[k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r,:] = c;
+                    b2[k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r] = 0;
                 else
-                    c( ((i-2)*(order+1)*n+(k-1)*(order+1)+1) : ((i-2)*(order+1)*n+(k-1)*(order+1))+order+1) = values;
-                    C2(k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r,:) = c;
-                    b2(k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r) = constraintData_r(i,h,k);
+                    c[ ((i-2)*(order+1)*n+(k-1)*(order+1)+1) : ((i-2)*(order+1)*n+(k-1)*(order+1))+order+1] = values;
+                    C2[k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r,:] = c;
+                    b2[k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r] = constraintData_r[i,h,k];
                 end
             end
 
             continuity = zeros(1,n-1);
             for k=1:n-1
-                if(constraintData_r(i,h,k)==eps)
+                if(constraintData_r[i,h,k]==eps(1.0))
                     #Continuity
-                    continuity(k) = true;
+                    continuity[k] = true;
                 end
                 c = zeros(1,n*(order+1)*m);
 
-                if(~continuity(k))
-                    c( ((i-1)*(order+1)*n+(k-1)*(order+1)+1) : ((i-1)*(order+1)*n+(k-1)*(order+1))+order+1) = values;
-                    C2(k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r + (n-1)*k_r,:) = c;
-                    b2(k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r + (n-1)*k_r) = constraintData_r(i,h,k);
+                if(continuity[k]==0)
+                    c[ ((i-1)*(order+1)*n+(k-1)*(order+1)+1) : ((i-1)*(order+1)*n+(k-1)*(order+1))+order+1] = values;
+                    C2[k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r + (n-1)*k_r,:] = c;
+                    b2[k + (h-1)*(n-1) + 2*(i-1)*(n-1)*k_r + (n-1)*k_r] = constraintData_r[i,h,k];
                 end
 
             end
@@ -317,57 +364,42 @@ end
 C3 = [];
 
 b3 = [];
-t_vector = (keyframe(1:3,corridor_position(2)) - keyframe(1:3,corridor_position(1)))...
-/norm(keyframe(1:3,corridor_position(2)) - keyframe(1:3,corridor_position(1)));
+t_vector = (keyframe[1:3,corridor_position[2]] - keyframe[1:3,corridor_position[1]])/norm(keyframe[1:3,corridor_position[2]] - keyframe[1:3,corridor_position[1]]);
 #unit vector of direction of the corridor
 
-t_intermediate = linspace(t(corridor_position(1)),t(corridor_position(2)),n_intermediate+2);
-t_intermediate = t_intermediate(2:end-1);
+t_intermediate = collect(range(t[corridor_position[1]], stop = t[corridor_position[2]], length = n_intermediate+2))
+t_intermediate = t_intermediate[2:end-1];
 #intermediate time stamps
 
-computeMat = eye(order+1);          #Required for computation of polynomials
+computeMat = diagm(ones(order+1));#Required for computation of polynomials
 for i = 1:n_intermediate
     values = zeros(1,order+1);
     for j=1:order+1
-        values(j) = polyval(computeMat(j,:),t_intermediate(i));
+        poly = Polynomial(computeMat[j,:])
+        values[j] = poly(t_intermediate[i]);
     end
 
     c = zeros(6, n*(order+1)*m);       #Absolute value constraint : two inequality constraints
     b = zeros(6, 1);
 
-    rix = keyframe(1,corridor_position(1));
-    riy = keyframe(2,corridor_position(1));
-    riz = keyframe(3,corridor_position(1));
+    rix = keyframe[1,corridor_position[1]];
+    riy = keyframe[2,corridor_position[1]];
+    riz = keyframe[3,corridor_position[1]];
     #x
-    c(1,(corridor_position(1)-1)*n*(order+1)+0*(order+1)+1:(corridor_position(1)-1)*n*(order+1)+3*(order+1))...
-        = [values zeros(1,2*(order+1))]...
-        - t_vector(1)*[t_vector(1)*values t_vector(2)*values t_vector(3)*values];
-    b(1) = corridor_width +...
-        rix+t_vector(1)*(-rix*t_vector(1) -riy*t_vector(2) -riz*t_vector(3));
-    c(2,(corridor_position(1)-1)*n*(order+1)+0*(order+1)+1:(corridor_position(1)-1)*n*(order+1)+3*(order+1))...
-        = -c(1,(corridor_position(1)-1)*n*(order+1)+0*(order+1)+1:(corridor_position(1)-1)*n*(order+1)+3*(order+1));
-    b(2) = corridor_width +...
-        -rix-t_vector(1)*(-rix*t_vector(1) -riy*t_vector(2) -riz*t_vector(3));
+    c[1,(corridor_position[1]-1)*n*(order+1)+0*(order+1)+1:(corridor_position[1]-1)*n*(order+1)+3*(order+1)] = [values zeros(1,2*(order+1))] - t_vector[1]*[t_vector[1]*values t_vector[2]*values t_vector[3]*values];
+    b[1] = corridor_width +rix+t_vector[1]*(-rix*t_vector[1] -riy*t_vector[2] -riz*t_vector[3]);
+    c[2,(corridor_position[1]-1)*n*(order+1)+0*(order+1)+1:(corridor_position[1]-1)*n*(order+1)+3*(order+1)] = -c[1,(corridor_position[1]-1)*n*(order+1)+0*(order+1)+1:(corridor_position[1]-1)*n*(order+1)+3*(order+1)];
+    b[2] = corridor_width -rix-t_vector[1]*(-rix*t_vector[1] -riy*t_vector[2] -riz*t_vector[3]);
     #y
-    c(3,(corridor_position(1)-1)*n*(order+1)+0*(order+1)+1:(corridor_position(1)-1)*n*(order+1)+3*(order+1))...
-        = [zeros(1,order+1) values zeros(1,order+1)]...
-        - t_vector(2)*[t_vector(1)*values t_vector(2)*values t_vector(3)*values];
-    b(3) = corridor_width +...
-        riy+t_vector(2)*(-rix*t_vector(1) -riy*t_vector(2) -riz*t_vector(3));
-    c(4,(corridor_position(1)-1)*n*(order+1)+0*(order+1)+1:(corridor_position(1)-1)*n*(order+1)+3*(order+1))...
-        = -c(3,(corridor_position(1)-1)*n*(order+1)+0*(order+1)+1:(corridor_position(1)-1)*n*(order+1)+3*(order+1));
-    b(4) = corridor_width +...
-        -riy-t_vector(2)*(-rix*t_vector(1) -riy*t_vector(2) -riz*t_vector(3));
+    c[3,(corridor_position[1]-1)*n*(order+1)+0*(order+1)+1:(corridor_position[1]-1)*n*(order+1)+3*(order+1)] = [zeros(1,order+1) values zeros(1,order+1)]- t_vector[2]*[t_vector[1]*values t_vector[2]*values t_vector[3]*values];
+    b[3] = corridor_width + riy+t_vector[2]*(-rix*t_vector[1] -riy*t_vector[2] -riz*t_vector[3]);
+    c[4,(corridor_position[1]-1)*n*(order+1)+0*(order+1)+1:(corridor_position[1]-1)*n*(order+1)+3*(order+1)] = -c[3,(corridor_position[1]-1)*n*(order+1)+0*(order+1)+1:(corridor_position[1]-1)*n*(order+1)+3*(order+1)];
+    b[4] = corridor_width -riy-t_vector[2]*(-rix*t_vector[1] -riy*t_vector[2] -riz*t_vector[3]);
     #z
-    c(5,(corridor_position(1)-1)*n*(order+1)+0*(order+1)+1:(corridor_position(1)-1)*n*(order+1)+3*(order+1))...
-        = [zeros(1,2*(order+1)) values]...
-        - t_vector(3)*[t_vector(1)*values t_vector(2)*values t_vector(3)*values];
-    b(5) = corridor_width +...
-        riz+t_vector(3)*(-rix*t_vector(1) -riy*t_vector(2) -riz*t_vector(3));
-    c(6,(corridor_position(1)-1)*n*(order+1)+0*(order+1)+1:(corridor_position(1)-1)*n*(order+1)+3*(order+1))...
-        = -c(5,(corridor_position(1)-1)*n*(order+1)+0*(order+1)+1:(corridor_position(1)-1)*n*(order+1)+3*(order+1));
-    b(6) = corridor_width +...
-        -riz-t_vector(3)*(-rix*t_vector(1) -riy*t_vector(2) -riz*t_vector(3));
+    c[5,(corridor_position[1]-1)*n*(order+1)+0*(order+1)+1:(corridor_position[1]-1)*n*(order+1)+3*(order+1)] = [zeros(1,2*(order+1)) values] - t_vector[3]*[t_vector[1]*values t_vector[2]*values t_vector[3]*values];
+    b[5] = corridor_width + riz+t_vector[3]*(-rix*t_vector[1] -riy*t_vector[2] -riz*t_vector[3]);
+    c[6,(corridor_position[1]-1)*n*(order+1)+0*(order+1)+1:(corridor_position[1]-1)*n*(order+1)+3*(order+1)] = -c[5,(corridor_position[1]-1)*n*(order+1)+0*(order+1)+1:(corridor_position[1]-1)*n*(order+1)+3*(order+1)];
+    b[6] = corridor_width -riz-t_vector[3]*(-rix*t_vector[1] -riy*t_vector[2] -riz*t_vector[3]);
 
     C3 = [C3; c];
     b3 = [b3; b];
