@@ -39,7 +39,7 @@ function computeTraj()
     ]
     m = size(keyframe, 2)
     n = 4                                  #number of flat outputs (x, y, z, psi)
-    t_f = 10                               #final time of the trajectory
+    t_f = 15                               #final time of the trajectory
 
     order = 6                              #order of polynomial functions
 
@@ -69,7 +69,57 @@ function computeTraj()
         corridor_width,
     )
     solution = optimizeTraj(A, C, b)
-    PlotTraj(solution, m, t, keyframe)
+    PlotTraj(solution, m, t, keyframe, n)
+end
+
+mutable struct uavstate
+    position
+    angle
+    speed
+end
+
+mutable struct waypoints
+    position
+    heading
+    speed
+    time
+end
+
+function a2bPoly(aState, bState, tfinal=10.0)
+    waypoints1 = waypoints(aState.position, aState.angle[1], eul2rotmZYX(aState.angle)*aState.speed, 0.0)
+    waypoints2 = waypoints(bState.position, bState.angle[1], eul2rotmZYX(bState.angle)*bState.speed, tfinal)
+    r_xyz = 1; r_yaw = 1;                                                   # regularization
+    H = zeros(18,18);    # 5 * 3 + 3 (4th order for xyz & 2nd order for yaw)
+    H[1,1] = r_xyz;
+    H[6,6] = r_xyz;
+    H[11,11] = 10000*r_xyz;
+    H[16,16] = r_yaw;
+    # start & final constraints (equality)
+    Aeq = [waypoints1.time^4 waypoints1.time^3 waypoints1.time^2 waypoints1.time 1 zeros(1,13)];            # x
+    Aeq = [Aeq;[zeros(1,5) waypoints1.time^4 waypoints1.time^3 waypoints1.time^2 waypoints1.time 1 zeros(1,8)]];  # y
+    Aeq = [Aeq;[zeros(1,10) waypoints1.time^4 waypoints1.time^3 waypoints1.time^2 waypoints1.time 1 zeros(1,3)]]; # z
+    Aeq = [Aeq;[zeros(1,15) waypoints1.time^2 waypoints1.time 1]]; # yaw
+    beq = [waypoints1.position[1];waypoints1.position[2];waypoints1.position[3];waypoints1.heading];
+
+    Aeq = [Aeq;[waypoints2.time^4 waypoints2.time^3 waypoints2.time^2 waypoints2.time 1 zeros(1,13)]];            # x
+    Aeq = [Aeq;[zeros(1,5) waypoints2.time^4 waypoints2.time^3 waypoints2.time^2 waypoints2.time 1 zeros(1,8)]];  # y
+    Aeq = [Aeq;[zeros(1,10) waypoints2.time^4 waypoints2.time^3 waypoints2.time^2 waypoints2.time 1 zeros(1,3)]]; # z
+    Aeq = [Aeq;[zeros(1,15) waypoints2.time^2 waypoints2.time 1]];                                                    # yaw
+    beq = [beq;waypoints2.position[1];waypoints2.position[2];waypoints2.position[3];waypoints2.heading];
+
+    # velocity of the start point
+    Aeq = [Aeq;[4*waypoints1.time^3 3*waypoints1.time^2 2*waypoints1.time 1 0 zeros(1,13)]];                              # x'
+    Aeq = [Aeq;[zeros(1,5) 4*waypoints1.time^3 3*waypoints1.time^2 2*waypoints1.time 1 0 zeros(1,8)]];                    # y'
+    Aeq = [Aeq;[zeros(1,10) 4*waypoints1.time^3 3*waypoints1.time^2 2*waypoints1.time 1 0 zeros(1,3)]];                   # z'
+    beq = [beq;waypoints1.speed[1];waypoints1.speed[2];waypoints1.speed[3]];
+    # velocity of the final point
+    Aeq = [Aeq;[cos(waypoints2.heading)*[4*waypoints2.time^3 3*waypoints2.time^2 2*waypoints2.time 1 0] sin(waypoints2.heading)*[4*waypoints2.time^3 3*waypoints2.time^2 2*waypoints2.time 1 0] zeros(1,8)]];
+    Aeq = [Aeq;[sin(waypoints2.heading)*[4*waypoints2.time^3 3*waypoints2.time^2 2*waypoints2.time 1 0] -cos(waypoints2.heading)*[4*waypoints2.time^3 3*waypoints2.time^2 2*waypoints2.time 1 0] zeros(1,8)]];
+    Aeq = [Aeq;[zeros(1,10) 4*waypoints2.time^3 3*waypoints2.time^2 2*waypoints2.time 1 0 zeros(1,3)]];                   # z'
+    beq = [beq;waypoints2.speed[1];waypoints2.speed[2];waypoints2.speed[3]];
+    # solving quadratic problem
+   sol = optimizeTraj(H,Aeq,beq)
+   plota2bPoly(sol, tfinal, aState, bState)
 end
 
 function computeCostMat(order, m, mu_r, mu_psi, k_r, k_psi, t)
@@ -518,12 +568,12 @@ function optimizeTraj(A, C, b)
     return value.(x)
 end
 
-function PlotTraj(solution, m, t, keyframe)
+function PlotTraj(solution, m, t, keyframe, n)
 
     dt = 0.01
     l = 0
     lm = length(t[i]:dt:t[i+1])
-    l = m*lm
+    l = m * lm
     x_trajec = zeros(l)
     y_trajec = zeros(l)
     z_trajec = zeros(l)
@@ -531,40 +581,82 @@ function PlotTraj(solution, m, t, keyframe)
     tvec = zeros(l)
 
     for i = 1:m
-        idx1 = (i-1)*lm+1
-        idx2 = i*lm
+        idx1 = (i - 1) * lm + 1
+        idx2 = i * lm
         x_trajec[idx1:idx2] = polyval(
             solution[(i-1)*n*(order+1)+1+0*(order+1):(i-1)*n*(order+1)+(order+1)+0*(order+1)],
-            t[i]:dt:t[i+1])
+            t[i]:dt:t[i+1],
+        )
         y_trajec[idx1:idx2] = polyval(
             solution[(i-1)*n*(order+1)+1+1*(order+1):(i-1)*n*(order+1)+(order+1)+1*(order+1)],
-            t[i]:dt:t[i+1])
+            t[i]:dt:t[i+1],
+        )
         z_trajec[idx1:idx2] = polyval(
             solution[(i-1)*n*(order+1)+1+2*(order+1):(i-1)*n*(order+1)+(order+1)+2*(order+1)],
-            t[i]:dt:t[i+1])
+            t[i]:dt:t[i+1],
+        )
         psi_trajec[idx1:idx2] = polyval(
             solution[(i-1)*n*(order+1)+1+3*(order+1):(i-1)*n*(order+1)+(order+1)+3*(order+1)],
-            t[i]:dt:t[i+1])
+            t[i]:dt:t[i+1],
+        )
         tvec[idx1:idx2] = Array(t[i]:dt:t[i+1])
     end
 
-l = @layout [a ; b ; c]
-default(dpi = 300)
-default(thickness_scaling = 2)
-default(size = [1200, 800])
-plot(tvec,x_trajec,lw=3,ylabel="x",label=nothing)
-p1 = plot!(t,keyframe[1,:],seriestype = :scatter,label=nothing)
-plot(tvec,y_trajec,lw=3,ylabel="y",label=nothing)
-p2 = plot!(t,keyframe[2,:],seriestype = :scatter,label=nothing)
-plot(tvec,z_trajec,lw=3,xlabel="Time [s]",ylabel="z",label=nothing)
-p3 = plot!(t,keyframe[3,:],seriestype = :scatter,label=nothing)
-p = plot(p1,p2,p3,layout=l)
-display(p)
+    l = @layout [a; b; c]
+    default(dpi = 300)
+    default(thickness_scaling = 2)
+    default(size = [1200, 800])
+    plot(tvec, x_trajec, lw = 3, ylabel = "x", label = nothing)
+    p1 = plot!(t, keyframe[1, :], seriestype = :scatter, label = nothing)
+    plot(tvec, y_trajec, lw = 3, ylabel = "y", label = nothing)
+    p2 = plot!(t, keyframe[2, :], seriestype = :scatter, label = nothing)
+    plot(tvec, z_trajec, lw = 3, xlabel = "Time [s]", ylabel = "z", label = nothing)
+    p3 = plot!(t, keyframe[3, :], seriestype = :scatter, label = nothing)
+    p = plot(p1, p2, p3, layout = l)
+    display(p)
 
+end
+function plota2bPoly(path_c,tfinal,aState,bState)
+    tvec = 0:0.01:tfinal;
+    x_trajec = path_c[1] * tvec.^4 .+ path_c[2] * tvec.^3 .+ path_c[3] * tvec.^2 .+ path_c[4] * tvec .+ path_c[5];
+    y_trajec = path_c[6] * tvec.^4 .+ path_c[7] * tvec.^3 .+ path_c[8] * tvec.^2 .+ path_c[9] * tvec .+ path_c[10];
+    z_trajec = path_c[11] * tvec.^4 .+ path_c[12] * tvec.^3 .+ path_c[13] * tvec.^2 .+ path_c[14] * tvec .+ path_c[15];
+    yaw = path_c[16] * tvec.^2 .+ path_c[17] * tvec .+ path_c[18];
+    default(dpi = 300)
+    default(thickness_scaling = 2)
+    default(size = [1200, 800])
+    l = @layout [a; b; c]
+    t = [0.0, tfinal]
+    pos = [aState.position bState.position]
+    p1 = plot(tvec, x_trajec, lw = 3, ylabel = "x", label = nothing)
+    p1 = plot!(t, pos[1,:], seriestype = :scatter, label = nothing)
+    p2 = plot(tvec, y_trajec, lw = 3, ylabel = "y", label = nothing)
+    p2 = plot!(t, pos[2,:], seriestype = :scatter, label = nothing)
+    p3 = plot(tvec, z_trajec, lw = 3, xlabel = "Time [s]", ylabel = "z", label = nothing)
+    p3 = plot!(t, pos[3,:], seriestype = :scatter, label = nothing)
+    p = plot(p1, p2, p3, layout = l)
+    display(p)
 end
 
 function polyval(matlabPoly, tvec)
     #mimics matlabs polyval function
     poly = Polynomial(reverse(matlabPoly))
     poly.(tvec)
+end
+
+function eul2rotmZYX(eul)
+    #mimics matlab
+    ct = cos.(eul)
+    st = sin.(eul)
+    R = zeros(3, 3)
+    R[1, 1] = ct[2] .* ct[1]
+    R[1, 2] = st[3] .* st[2] .* ct[1] - ct[3] .* st[1]
+    R[1, 3] = ct[3] .* st[2] .* ct[1] + st[3] .* st[1]
+    R[2, 1] = ct[2] .* st[1]
+    R[2, 2] = st[3] .* st[2] .* st[1] + ct[3] .* ct[1]
+    R[2, 3] = ct[3] .* st[2] .* st[1] - st[3] .* ct[1]
+    R[3, 1] = -st[2]
+    R[3, 2] = st[3] .* ct[2]
+    R[3, 3] = ct[3] .* ct[2]
+    return R
 end
