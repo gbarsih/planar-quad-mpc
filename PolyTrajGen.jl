@@ -7,21 +7,22 @@
 ██║  ██║╚██████╗██║  ██║███████╗
 ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝
 
-File:       PlanarQuadMPC.jl
+File:       PolyTrajGen.jl
 Author:     Gabriel Barsi Haberfeld, 2020. gbh2@illinois.edu
-Function:   This program implemetns an MPC controller for trajectory tracking of
-            a planar quadrotor.
+Function:   This program implements minSnapTrajec_matlab by Clark-Youngdong-Son
+            in Julia.
 
 Instructions:   Run this file in juno with Julia 1.5.1 or later.
-Requirements:   JuMP, Ipopt, Plots, LinearAlgebra, BenchmarkTools.
+Requirements:   JuMP, COSMO, Plots, LinearAlgebra, Polynomials, ControlSystems,
+                and BenchmarkTools
 
 """
 
-using JuMP, Ipopt
+using JuMP, COSMO
 using Plots, LinearAlgebra
 using Polynomials
-using SparseArrays
 using ControlSystems
+using BenchmarkTools
 
 function computeTraj()
     m_q = 4                                #mass of a quadrotor
@@ -67,10 +68,8 @@ function computeTraj()
         n_intermediate,
         corridor_width,
     )
-    sA = size(A)
-    sC = size(C)
-    sb = size(b)
-    @show sA, sC, sb
+    solution = optimizeTraj(A, C, b)
+    PlotTraj(solution, m, t, keyframe)
 end
 
 function computeCostMat(order, m, mu_r, mu_psi, k_r, k_psi, t)
@@ -108,13 +107,13 @@ function computeCostMat(order, m, mu_r, mu_psi, k_r, k_psi, t)
                             (t[i+1]^(order_t_r + 1) - t[i]^(order_t_r + 1))
                     else
                         A_x[j, k] =
-                            2 * polynomial_r[j] * polynomial_r[k-1] / (order_t_r + 1) *
+                            2 * polynomial_r[j] * polynomial_r[k] / (order_t_r + 1) *
                             (t[i+1]^(order_t_r + 1) - t[i]^(order_t_r + 1))
                         A_y[j, k] =
-                            2 * polynomial_r[j] * polynomial_r[k-1] / (order_t_r + 1) *
+                            2 * polynomial_r[j] * polynomial_r[k] / (order_t_r + 1) *
                             (t[i+1]^(order_t_r + 1) - t[i]^(order_t_r + 1))
                         A_z[j, k] =
-                            2 * polynomial_r[j] * polynomial_r[k-1] / (order_t_r + 1) *
+                            2 * polynomial_r[j] * polynomial_r[k] / (order_t_r + 1) *
                             (t[i+1]^(order_t_r + 1) - t[i]^(order_t_r + 1))
                     end
                 end
@@ -507,4 +506,65 @@ function computeConstraint(
         b = [b1; b2]
     end
     return C, b, C3, b3
+end
+
+function optimizeTraj(A, C, b)
+    A = 2 .* A
+    m = JuMP.Model(with_optimizer(COSMO.Optimizer, max_iter = 5000, verbose = false))
+    @variable(m, x[1:size(A, 1)])
+    @objective(m, Min, 1 / 2 * x' * A * x)
+    @constraint(m, C * x .== b)
+    JuMP.optimize!(m)
+    return value.(x)
+end
+
+function PlotTraj(solution, m, t, keyframe)
+
+    dt = 0.01
+    l = 0
+    lm = length(t[i]:dt:t[i+1])
+    l = m*lm
+    x_trajec = zeros(l)
+    y_trajec = zeros(l)
+    z_trajec = zeros(l)
+    psi_trajec = zeros(l)
+    tvec = zeros(l)
+
+    for i = 1:m
+        idx1 = (i-1)*lm+1
+        idx2 = i*lm
+        x_trajec[idx1:idx2] = polyval(
+            solution[(i-1)*n*(order+1)+1+0*(order+1):(i-1)*n*(order+1)+(order+1)+0*(order+1)],
+            t[i]:dt:t[i+1])
+        y_trajec[idx1:idx2] = polyval(
+            solution[(i-1)*n*(order+1)+1+1*(order+1):(i-1)*n*(order+1)+(order+1)+1*(order+1)],
+            t[i]:dt:t[i+1])
+        z_trajec[idx1:idx2] = polyval(
+            solution[(i-1)*n*(order+1)+1+2*(order+1):(i-1)*n*(order+1)+(order+1)+2*(order+1)],
+            t[i]:dt:t[i+1])
+        psi_trajec[idx1:idx2] = polyval(
+            solution[(i-1)*n*(order+1)+1+3*(order+1):(i-1)*n*(order+1)+(order+1)+3*(order+1)],
+            t[i]:dt:t[i+1])
+        tvec[idx1:idx2] = Array(t[i]:dt:t[i+1])
+    end
+
+l = @layout [a ; b ; c]
+default(dpi = 300)
+default(thickness_scaling = 2)
+default(size = [1200, 800])
+plot(tvec,x_trajec,lw=3,ylabel="x",label=nothing)
+p1 = plot!(t,keyframe[1,:],seriestype = :scatter,label=nothing)
+plot(tvec,y_trajec,lw=3,ylabel="y",label=nothing)
+p2 = plot!(t,keyframe[2,:],seriestype = :scatter,label=nothing)
+plot(tvec,z_trajec,lw=3,xlabel="Time [s]",ylabel="z",label=nothing)
+p3 = plot!(t,keyframe[3,:],seriestype = :scatter,label=nothing)
+p = plot(p1,p2,p3,layout=l)
+display(p)
+
+end
+
+function polyval(matlabPoly, tvec)
+    #mimics matlabs polyval function
+    poly = Polynomial(reverse(matlabPoly))
+    poly.(tvec)
 end
