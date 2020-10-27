@@ -88,7 +88,7 @@ end
 function a2bPoly(aState, bState, tfinal=10.0)
     waypoints1 = waypoints(aState.position, aState.angle[1], eul2rotmZYX(aState.angle)*aState.speed, 0.0)
     waypoints2 = waypoints(bState.position, bState.angle[1], eul2rotmZYX(bState.angle)*bState.speed, tfinal)
-    r_xyz = 1; r_yaw = 1;                                                   # regularization
+    r_xyz = 1; r_yaw = 1;
     H = zeros(18,18);    # 5 * 3 + 3 (4th order for xyz & 2nd order for yaw)
     H[1,1] = r_xyz;
     H[6,6] = r_xyz;
@@ -120,6 +120,7 @@ function a2bPoly(aState, bState, tfinal=10.0)
     # solving quadratic problem
    sol = optimizeTraj(H,Aeq,beq)
    plota2bPoly(sol, tfinal, aState, bState)
+   return sol
 end
 
 function computeCostMat(order, m, mu_r, mu_psi, k_r, k_psi, t)
@@ -614,8 +615,8 @@ function PlotTraj(solution, m, t, keyframe, n)
     p3 = plot!(t, keyframe[3, :], seriestype = :scatter, label = nothing)
     p = plot(p1, p2, p3, layout = l)
     display(p)
-
 end
+
 function plota2bPoly(path_c,tfinal,aState,bState)
     tvec = 0:0.01:tfinal;
     x_trajec = path_c[1] * tvec.^4 .+ path_c[2] * tvec.^3 .+ path_c[3] * tvec.^2 .+ path_c[4] * tvec .+ path_c[5];
@@ -636,6 +637,7 @@ function plota2bPoly(path_c,tfinal,aState,bState)
     p3 = plot!(t, pos[3,:], seriestype = :scatter, label = nothing)
     p = plot(p1, p2, p3, layout = l)
     display(p)
+    return nothing
 end
 
 function polyval(matlabPoly, tvec)
