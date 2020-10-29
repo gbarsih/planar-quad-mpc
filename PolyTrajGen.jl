@@ -23,6 +23,7 @@ using Plots, LinearAlgebra
 using Polynomials
 using ControlSystems
 using BenchmarkTools
+using CSV
 
 function computeTraj()
     m_q = 4                                #mass of a quadrotor
@@ -116,7 +117,7 @@ function a2bPoly(aState, bState, tfinal=10.0)
     Aeq = [Aeq;[cos(waypoints2.heading)*[4*waypoints2.time^3 3*waypoints2.time^2 2*waypoints2.time 1 0] sin(waypoints2.heading)*[4*waypoints2.time^3 3*waypoints2.time^2 2*waypoints2.time 1 0] zeros(1,8)]];
     Aeq = [Aeq;[sin(waypoints2.heading)*[4*waypoints2.time^3 3*waypoints2.time^2 2*waypoints2.time 1 0] -cos(waypoints2.heading)*[4*waypoints2.time^3 3*waypoints2.time^2 2*waypoints2.time 1 0] zeros(1,8)]];
     Aeq = [Aeq;[zeros(1,10) 4*waypoints2.time^3 3*waypoints2.time^2 2*waypoints2.time 1 0 zeros(1,3)]];                   # z'
-    beq = [beq;waypoints2.speed[1];waypoints2.speed[2];waypoints2.speed[3]];
+    beq = [beq;-waypoints2.speed[1];waypoints2.speed[2];waypoints2.speed[3]];
     # solving quadratic problem
    sol = optimizeTraj(H,Aeq,beq)
    plota2bPoly(sol, tfinal, aState, bState)
@@ -617,12 +618,50 @@ function PlotTraj(solution, m, t, keyframe, n)
     display(p)
 end
 
-function plota2bPoly(path_c,tfinal,aState,bState)
-    tvec = 0:0.01:tfinal;
-    x_trajec = path_c[1] * tvec.^4 .+ path_c[2] * tvec.^3 .+ path_c[3] * tvec.^2 .+ path_c[4] * tvec .+ path_c[5];
-    y_trajec = path_c[6] * tvec.^4 .+ path_c[7] * tvec.^3 .+ path_c[8] * tvec.^2 .+ path_c[9] * tvec .+ path_c[10];
-    z_trajec = path_c[11] * tvec.^4 .+ path_c[12] * tvec.^3 .+ path_c[13] * tvec.^2 .+ path_c[14] * tvec .+ path_c[15];
-    yaw = path_c[16] * tvec.^2 .+ path_c[17] * tvec .+ path_c[18];
+function writeCSV(solution, m, t, keyframe, n)
+    dt = 0.01
+    l = 0
+    lm = length(t[i]:dt:t[i+1])
+    l = m * lm
+    x_trajec = zeros(l)
+    y_trajec = zeros(l)
+    z_trajec = zeros(l)
+    psi_trajec = zeros(l)
+    tvec = zeros(l)
+
+    for i = 1:m
+
+            solution[(i-1)*n*(order+1)+1+0*(order+1):(i-1)*n*(order+1)+(order+1)+0*(order+1)],
+            t[i]:dt:t[i+1],
+        )
+        y_trajec[idx1:idx2] = polyval(
+            solution[(i-1)*n*(order+1)+1+1*(order+1):(i-1)*n*(order+1)+(order+1)+1*(order+1)],
+            t[i]:dt:t[i+1],
+        )
+        z_trajec[idx1:idx2] = polyval(
+            solution[(i-1)*n*(order+1)+1+2*(order+1):(i-1)*n*(order+1)+(order+1)+2*(order+1)],
+            t[i]:dt:t[i+1],
+        )
+        psi_trajec[idx1:idx2] = polyval(
+            solution[(i-1)*n*(order+1)+1+3*(order+1):(i-1)*n*(order+1)+(order+1)+3*(order+1)],
+            t[i]:dt:t[i+1],
+        )
+        tvec[idx1:idx2] = Array(t[i]:dt:t[i+1])
+    end
+end
+
+function plota2bPoly(path_c, tfinal, aState, bState)
+    tvec = 0:0.01:tfinal
+    x_trajec =
+        path_c[1] * tvec .^ 4 .+ path_c[2] * tvec .^ 3 .+ path_c[3] * tvec .^ 2 .+
+        path_c[4] * tvec .+ path_c[5]
+    y_trajec =
+        path_c[6] * tvec .^ 4 .+ path_c[7] * tvec .^ 3 .+ path_c[8] * tvec .^ 2 .+
+        path_c[9] * tvec .+ path_c[10]
+    z_trajec =
+        path_c[11] * tvec .^ 4 .+ path_c[12] * tvec .^ 3 .+ path_c[13] * tvec .^ 2 .+
+        path_c[14] * tvec .+ path_c[15]
+    yaw = path_c[16] * tvec .^ 2 .+ path_c[17] * tvec .+ path_c[18]
     default(dpi = 300)
     default(thickness_scaling = 2)
     default(size = [1200, 800])
@@ -630,11 +669,11 @@ function plota2bPoly(path_c,tfinal,aState,bState)
     t = [0.0, tfinal]
     pos = [aState.position bState.position]
     p1 = plot(tvec, x_trajec, lw = 3, ylabel = "x", label = nothing)
-    p1 = plot!(t, pos[1,:], seriestype = :scatter, label = nothing)
+    p1 = plot!(t, pos[1, :], seriestype = :scatter, label = nothing)
     p2 = plot(tvec, y_trajec, lw = 3, ylabel = "y", label = nothing)
-    p2 = plot!(t, pos[2,:], seriestype = :scatter, label = nothing)
+    p2 = plot!(t, pos[2, :], seriestype = :scatter, label = nothing)
     p3 = plot(tvec, z_trajec, lw = 3, xlabel = "Time [s]", ylabel = "z", label = nothing)
-    p3 = plot!(t, pos[3,:], seriestype = :scatter, label = nothing)
+    p3 = plot!(t, pos[3, :], seriestype = :scatter, label = nothing)
     p = plot(p1, p2, p3, layout = l)
     display(p)
     return nothing
